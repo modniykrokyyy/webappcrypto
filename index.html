@@ -26,8 +26,7 @@
     background: var(--bg);
     color: var(--text);
     font-family: 'SF Pro Display', -apple-system, 'Segoe UI', sans-serif;
-    height: 100vh;
-    max-height: 100vh;
+    height: 100dvh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -130,6 +129,7 @@
     flex: 1;
     position: relative;
     overflow: hidden;
+    min-height: 0; /* критично для flex на Android */
   }
   #chart { width: 100%; height: 100%; }
 
@@ -290,26 +290,16 @@ const TP3     = parseFloat(params.get('tp3')    || 0);
 const DIR     = params.get('dir') || '';
 
 // ─── Telegram WebApp init ─────────────────────────────────────────────────
-function applyTgViewport() {
-  const tg = window.Telegram?.WebApp;
-  if (!tg) return;
+if (window.Telegram?.WebApp) {
+  const tg = Telegram.WebApp;
   tg.ready();
   tg.expand();
-  try { tg.setHeaderColor('#0d1117'); } catch(e){}
-  try { tg.setBackgroundColor('#0d1117'); } catch(e){}
-
-  function setHeight() {
-    const h = tg.viewportStableHeight || tg.viewportHeight || window.innerHeight;
-    document.body.style.height = h + 'px';
-    document.body.style.maxHeight = h + 'px';
-    // fitCharts вызываем только если графики уже созданы
+  try { tg.setHeaderColor('#0d1117'); } catch(e) {}
+  try { tg.setBackgroundColor('#0d1117'); } catch(e) {}
+  tg.onEvent('viewportChanged', () => {
     if (chart && rsiChart) fitCharts();
-  }
-  tg.onEvent('viewportChanged', setHeight);
-  setTimeout(setHeight, 200);
-  setTimeout(setHeight, 600);
+  });
 }
-applyTgViewport();
 
 // ─── State ────────────────────────────────────────────────────────────────
 let currentTf   = INIT_TF;
@@ -387,12 +377,30 @@ function initCharts() {
 }
 
 function fitCharts() {
-  const cw = document.getElementById('chart-wrap').clientWidth;
-  const ch = document.getElementById('chart-wrap').clientHeight;
-  chart?.resize(cw, ch);
-  const rw = document.getElementById('rsi-wrap').clientWidth;
-  const rh = document.getElementById('rsi-wrap').clientHeight;
-  rsiChart?.resize(rw, rh);
+  // Считаем высоту явно — flex:1 ненадёжен в Telegram Android WebView
+  const totalH = window.Telegram?.WebApp?.viewportStableHeight
+               || window.Telegram?.WebApp?.viewportHeight
+               || window.innerHeight;
+
+  const headerH   = document.getElementById('header')?.offsetHeight    || 44;
+  const tfBarH    = document.getElementById('tf-bar')?.offsetHeight     || 34;
+  const indBarH   = document.getElementById('ind-bar')?.offsetHeight    || 30;
+  const rsiH      = 90;
+  const levelH    = document.getElementById('level-panel')?.offsetHeight || 0;
+
+  const chartH = Math.max(totalH - headerH - tfBarH - indBarH - rsiH - levelH - 2, 150);
+
+  const wrap = document.getElementById('chart-wrap');
+  const rsiWrap = document.getElementById('rsi-wrap');
+  wrap.style.height    = chartH + 'px';
+  wrap.style.minHeight = chartH + 'px';
+  rsiWrap.style.height = rsiH + 'px';
+
+  const cw = wrap.clientWidth || window.innerWidth;
+  chart?.resize(cw, chartH);
+
+  const rw = rsiWrap.clientWidth || window.innerWidth;
+  rsiChart?.resize(rw, rsiH);
 }
 
 // ─── Indicators calculation ───────────────────────────────────────────────
@@ -657,7 +665,18 @@ buildLevelPanel();
 document.querySelectorAll('.tf-btn').forEach(b => {
   b.classList.toggle('active', b.dataset.tf === INIT_TF);
 });
-setTimeout(() => { fitCharts(); loadData(INIT_TF); }, 300);
+
+function initLoad() {
+  fitCharts();
+  loadData(INIT_TF);
+}
+setTimeout(initLoad, 50);
+setTimeout(fitCharts, 300);
+setTimeout(fitCharts, 800);
+
+document.querySelectorAll('.tf-btn').forEach(b => {
+  b.classList.toggle('active', b.dataset.tf === INIT_TF);
+});
 </script>
 </body>
 </html>
