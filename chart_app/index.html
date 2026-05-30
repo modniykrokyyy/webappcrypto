@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Chart App</title>
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --bg:       #0d1117;
+    --bg2:      #161b22;
+    --border:   #30363d;
+    --text:     #e6edf3;
+    --muted:    #7d8590;
+    --green:    #22ab94;
+    --red:      #f23645;
+    --blue:     #2962ff;
+    --yellow:   #ffb300;
+    --purple:   #7e57c2;
+    --accent:   #58a6ff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'SF Pro Display', -apple-system, 'Segoe UI', sans-serif;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  /* ── Header ── */
+  #header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px 8px;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  #symbol-badge {
+    font-size: 17px;
+    font-weight: 700;
+    letter-spacing: .5px;
+    color: var(--text);
+  }
+  #price-badge {
+    font-size: 16px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    transition: color .3s;
+  }
+  #change-badge {
+    font-size: 12px;
+    padding: 2px 7px;
+    border-radius: 5px;
+    font-weight: 600;
+  }
+  .change-pos { background: rgba(34,171,148,.15); color: var(--green); }
+  .change-neg { background: rgba(242, 54, 69,.15); color: var(--red); }
+
+  /* ── Timeframe bar ── */
+  #tf-bar {
+    display: flex;
+    gap: 4px;
+    padding: 6px 14px;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  #tf-bar::-webkit-scrollbar { display: none; }
+  .tf-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all .15s;
+    white-space: nowrap;
+  }
+  .tf-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .tf-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #0d1117;
+  }
+
+  /* ── Indicator toggles ── */
+  #ind-bar {
+    display: flex;
+    gap: 6px;
+    padding: 5px 14px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  #ind-bar::-webkit-scrollbar { display: none; }
+  .ind-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    font-size: 10px;
+    font-weight: 700;
+    padding: 3px 9px;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: all .15s;
+    white-space: nowrap;
+  }
+  .ind-btn[data-color="yellow"] { color: var(--yellow); }
+  .ind-btn[data-color="blue"]   { color: var(--blue); }
+  .ind-btn[data-color="purple"] { color: var(--purple); }
+  .ind-btn[data-color="green"]  { color: var(--green); }
+  .ind-btn.active { filter: brightness(1.4); border-color: currentColor; }
+
+  /* ── Chart container ── */
+  #chart-wrap {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+  }
+  #chart { width: 100%; height: 100%; }
+
+  /* ── RSI pane ── */
+  #rsi-wrap {
+    height: 90px;
+    flex-shrink: 0;
+    position: relative;
+    border-top: 1px solid var(--border);
+    background: var(--bg);
+  }
+  #rsi-chart { width: 100%; height: 100%; }
+  #rsi-label {
+    position: absolute;
+    top: 4px;
+    left: 8px;
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--purple);
+    pointer-events: none;
+    z-index: 10;
+  }
+
+  /* ── Level panel (Entry / SL / TP) ── */
+  #level-panel {
+    display: flex;
+    gap: 6px;
+    padding: 6px 14px;
+    background: var(--bg2);
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+    font-size: 11px;
+  }
+  #level-panel::-webkit-scrollbar { display: none; }
+  .level-chip {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 4px 10px;
+    border-radius: 7px;
+    border: 1px solid var(--border);
+    white-space: nowrap;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .level-chip:hover { filter: brightness(1.3); }
+  .level-chip.entry { border-color: var(--blue);   color: var(--blue); }
+  .level-chip.sl    { border-color: var(--red);    color: var(--red); }
+  .level-chip.tp    { border-color: var(--green);  color: var(--green); }
+  .level-chip .lbl  { font-size: 9px; font-weight: 700; color: var(--muted); }
+
+  /* ── Loading ── */
+  #loading {
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    z-index: 100;
+    transition: opacity .3s;
+  }
+  .spinner {
+    width: 36px;
+    height: 36px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #loading p { color: var(--muted); font-size: 13px; }
+
+  /* ── Crosshair tooltip ── */
+  #tooltip {
+    position: absolute;
+    background: rgba(22,27,34,.92);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 11px;
+    pointer-events: none;
+    z-index: 50;
+    display: none;
+    backdrop-filter: blur(6px);
+    white-space: nowrap;
+  }
+  #tooltip .t-row { display: flex; gap: 8px; justify-content: space-between; }
+  #tooltip .t-lbl { color: var(--muted); }
+  #tooltip .t-val { font-weight: 600; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+
+<!-- Loading -->
+<div id="loading">
+  <div class="spinner"></div>
+  <p id="loading-text">Загрузка данных…</p>
+</div>
+
+<!-- Header -->
+<div id="header">
+  <span id="symbol-badge">—</span>
+  <span id="price-badge">—</span>
+  <span id="change-badge" class="change-pos">—</span>
+</div>
+
+<!-- Timeframe bar -->
+<div id="tf-bar">
+  <button class="tf-btn" data-tf="1m">1М</button>
+  <button class="tf-btn" data-tf="3m">3М</button>
+  <button class="tf-btn active" data-tf="5m">5М</button>
+  <button class="tf-btn" data-tf="15m">15М</button>
+  <button class="tf-btn" data-tf="30m">30М</button>
+  <button class="tf-btn" data-tf="1h">1Ч</button>
+  <button class="tf-btn" data-tf="4h">4Ч</button>
+  <button class="tf-btn" data-tf="1d">1Д</button>
+</div>
+
+<!-- Indicator toggles -->
+<div id="ind-bar">
+  <button class="ind-btn active" data-ind="ema20"  data-color="yellow">EMA 20</button>
+  <button class="ind-btn active" data-ind="ema50"  data-color="blue">EMA 50</button>
+  <button class="ind-btn"        data-ind="ema200" data-color="green">EMA 200</button>
+  <button class="ind-btn active" data-ind="vwap"   data-color="purple">VWAP</button>
+  <button class="ind-btn active" data-ind="levels" data-color="green">📐 Уровни</button>
+</div>
+
+<!-- Main chart -->
+<div id="chart-wrap">
+  <div id="chart"></div>
+  <div id="tooltip"></div>
+</div>
+
+<!-- RSI pane -->
+<div id="rsi-wrap">
+  <div id="rsi-label">RSI (14)</div>
+  <div id="rsi-chart"></div>
+</div>
+
+<!-- Level chips -->
+<div id="level-panel" id="level-panel"></div>
+
+<script>
+const params  = new URLSearchParams(location.search);
+const SYMBOL  = (params.get('symbol') || 'BTCUSDT').toUpperCase();
+const INIT_TF = params.get('tf') || '5m';
+const ENTRY   = parseFloat(params.get('entry')  || 0);
+const SL      = parseFloat(params.get('sl')     || 0);
+const TP1     = parseFloat(params.get('tp1')    || 0);
+const TP2     = parseFloat(params.get('tp2')    || 0);
+const TP3     = parseFloat(params.get('tp3')    || 0);
+const DIR     = params.get('dir') || '';
+
+// ─── Telegram WebApp init ─────────────────────────────────────────────────
+if (window.Telegram?.WebApp) {
+  Telegram.WebApp.ready();
+  Telegram.WebApp.expand();
+  Telegram.WebApp.setHeaderColor('#0d1117');
+  Telegram.WebApp.setBackgroundColor('#0d1117');
+}
+
+// ─── State ────────────────────────────────────────────────────────────────
+let currentTf   = INIT_TF;
+let chart        = null;
+let rsiChart     = null;
+let candleSeries = null;
+let rsiLine      = null;
+let ema20Series  = null;
+let ema50Series  = null;
+let ema200Series = null;
+let vwapSeries   = null;
+let levelLines   = [];
+let tickerInterval = null;
+const indVisible = { ema20: true, ema50: true, ema200: false, vwap: true, levels: true };
+
+// ─── Chart init ───────────────────────────────────────────────────────────
+function initCharts() {
+  const chartEl = document.getElementById('chart');
+  const rsiEl   = document.getElementById('rsi-chart');
+  const colors  = {
+    background: { type: 'solid', color: '#0d1117' },
+    textColor: '#7d8590',
+    borderColor: '#30363d',
+    grid: { vertLines: { color: '#1c2128' }, horzLines: { color: '#1c2128' } },
+  };
+
+  chart = LightweightCharts.createChart(chartEl, {
+    layout: { ...colors },
+    grid:   colors.grid,
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    rightPriceScale: { borderColor: '#30363d' },
+    timeScale: { borderColor: '#30363d', timeVisible: true, secondsVisible: false },
+    handleScroll: true,
+    handleScale:  true,
+  });
+
+  candleSeries = chart.addCandlestickSeries({
+    upColor: '#22ab94', downColor: '#f23645',
+    borderUpColor: '#22ab94', borderDownColor: '#f23645',
+    wickUpColor: '#22ab94', wickDownColor: '#f23645',
+  });
+
+  ema20Series  = chart.addLineSeries({ color: '#ffb300', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: false });
+  ema50Series  = chart.addLineSeries({ color: '#2962ff', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: false });
+  ema200Series = chart.addLineSeries({ color: '#22ab94', lineWidth: 1,   priceLineVisible: false, lastValueVisible: false, visible: false });
+  vwapSeries   = chart.addLineSeries({ color: '#7e57c2', lineWidth: 1.5, lineStyle: 1, priceLineVisible: false, lastValueVisible: false });
+
+  // RSI chart
+  rsiChart = LightweightCharts.createChart(rsiEl, {
+    layout: { ...colors },
+    grid:   colors.grid,
+    rightPriceScale: { borderColor: '#30363d', autoScale: false, mode: LightweightCharts.PriceScaleMode.Normal },
+    timeScale: { visible: false },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    handleScroll: false,
+    handleScale:  false,
+  });
+
+  rsiLine = rsiChart.addLineSeries({
+    color: '#7e57c2', lineWidth: 1.5,
+    priceLineVisible: false, lastValueVisible: true,
+    autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }),
+  });
+
+  // RSI
+  rsiChart.addLineSeries({ color: 'rgba(126,87,194,.25)', lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
+
+  chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+    if (range) rsiChart.timeScale().setVisibleLogicalRange(range);
+  });
+
+  // Crosshair tooltip
+  chart.subscribeCrosshairMove(handleCrosshair);
+  new ResizeObserver(() => fitCharts()).observe(chartEl);
+}
+
+function fitCharts() {
+  const cw = document.getElementById('chart-wrap').clientWidth;
+  const ch = document.getElementById('chart-wrap').clientHeight;
+  chart?.resize(cw, ch);
+  const rw = document.getElementById('rsi-wrap').clientWidth;
+  const rh = document.getElementById('rsi-wrap').clientHeight;
+  rsiChart?.resize(rw, rh);
+}
+
+// ─── Indicators calculation ───────────────────────────────────────────────
+function calcEMA(data, period) {
+  const k = 2 / (period + 1);
+  const out = [];
+  let prev = null;
+  data.forEach((d, i) => {
+    const v = i === 0 ? d.close : d.close * k + prev * (1 - k);
+    out.push({ time: d.time, value: v });
+    prev = v;
+  });
+  return out;
+}
+
+function calcVWAP(data) {
+  const out = [];
+  let sumPV = 0, sumV = 0;
+  data.forEach(d => {
+    const tp = (d.high + d.low + d.close) / 3;
+    sumPV += tp * d.volume;
+    sumV  += d.volume;
+    out.push({ time: d.time, value: sumPV / (sumV || 1) });
+  });
+  return out;
+}
+
+function calcRSI(data, period = 14) {
+  if (data.length < period + 1) return [];
+  let ag = 0, al = 0;
+  for (let i = 1; i <= period; i++) {
+    const d = data[i].close - data[i-1].close;
+    if (d > 0) ag += d; else al -= d;
+  }
+  ag /= period; al /= period;
+  const out = [];
+  for (let i = period; i < data.length; i++) {
+    if (i > period) {
+      const d = data[i].close - data[i-1].close;
+      ag = (ag * (period-1) + (d > 0 ? d : 0)) / period;
+      al = (al * (period-1) + (d < 0 ? -d : 0)) / period;
+    }
+    out.push({ time: data[i].time, value: al === 0 ? 100 : 100 - 100 / (1 + ag/al) });
+  }
+  return out;
+}
+
+// ─── Price levels ─────────────────────────────────────────────────────────
+function drawLevels() {
+  levelLines.forEach(l => { try { chart.removePriceLine(l); } catch(e){} });
+  levelLines = [];
+  if (!indVisible.levels) return;
+  const add = (price, color, title) => {
+    if (!price) return;
+    levelLines.push(candleSeries.createPriceLine({
+      price, color, lineWidth: 1.5,
+      lineStyle: LightweightCharts.LineStyle.Dashed,
+      axisLabelVisible: true, title,
+    }));
+  };
+  if (ENTRY) add(ENTRY, '#2962ff', 'ENTRY');
+  if (SL)    add(SL,    '#f23645', 'SL');
+  if (TP1)   add(TP1,   '#22ab94', 'TP1');
+  if (TP2)   add(TP2,   '#22ab94', 'TP2');
+  if (TP3)   add(TP3,   '#22ab94', 'TP3');
+}
+
+function buildLevelPanel() {
+  const panel = document.getElementById('level-panel');
+  panel.innerHTML = '';
+  const levels = [];
+  if (ENTRY) levels.push({ cls: 'entry', lbl: 'ENTRY', val: ENTRY });
+  if (SL)    levels.push({ cls: 'sl',    lbl: 'СТОП',  val: SL });
+  if (TP1)   levels.push({ cls: 'tp',    lbl: 'TP 1',  val: TP1 });
+  if (TP2)   levels.push({ cls: 'tp',    lbl: 'TP 2',  val: TP2 });
+  if (TP3)   levels.push({ cls: 'tp',    lbl: 'TP 3',  val: TP3 });
+  levels.forEach(({ cls, lbl, val }) => {
+    const chip = document.createElement('div');
+    chip.className = `level-chip ${cls}`;
+    chip.innerHTML = `<span class="lbl">${lbl}</span><span>${formatPrice(val)}</span>`;
+    chip.onclick = () => {
+      candleSeries.applyOptions({ lastValueVisible: true });
+      chart.timeScale().scrollToRealTime();
+    };
+    panel.appendChild(chip);
+  });
+  if (!levels.length) panel.style.display = 'none';
+}
+
+// ─── Data fetching ────────────────────────────────────────────────────────
+const TF_BINANCE = { '1m':'1m','3m':'3m','5m':'5m','15m':'15m','30m':'30m','1h':'1h','4h':'4h','1d':'1d' };
+const TF_BINGX   = { '1m':'1','3m':'3','5m':'5','15m':'15','30m':'30','1h':'60','4h':'240','1d':'D' };
+
+async function fetchBinance(symbol, tf, limit = 300) {
+  const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${TF_BINANCE[tf]}&limit=${limit}`;
+  const r = await fetch(url);
+  const j = await r.json();
+  if (!Array.isArray(j)) return null;
+  return j.map(c => ({
+    time:   Math.floor(parseInt(c[0]) / 1000),
+    open:   parseFloat(c[1]),
+    high:   parseFloat(c[2]),
+    low:    parseFloat(c[3]),
+    close:  parseFloat(c[4]),
+    volume: parseFloat(c[5]),
+  }));
+}
+
+async function fetchBingX(symbol, tf, limit = 300) {
+  const bx = symbol.replace('USDT', '-USDT');
+  const url = `https://open-api.bingx.com/openApi/swap/v2/quote/klines?symbol=${bx}&interval=${TF_BINGX[tf]}&limit=${limit}`;
+  try {
+    const r = await fetch(url);
+    const j = await r.json();
+    const candles = j?.data;
+    if (!Array.isArray(candles) || !candles.length) return null;
+    return candles.map(c => ({
+      time:   Math.floor(parseInt(c.time || c.openTime) / 1000),
+      open:   parseFloat(c.open),
+      high:   parseFloat(c.high),
+      low:    parseFloat(c.low),
+      close:  parseFloat(c.close),
+      volume: parseFloat(c.volume),
+    }));
+  } catch(e) { return null; }
+}
+
+async function fetchCandles(symbol, tf) {
+  let data = await fetchBinance(symbol, tf);
+  if (!data || data.length < 5) {
+    setLoadingText('Binance: нет данных, пробую BingX…');
+    data = await fetchBingX(symbol, tf);
+  }
+  return data;
+}
+
+async function fetchTicker(symbol) {
+  try {
+    const r = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}`);
+    return await r.json();
+  } catch(e) { return null; }
+}
+
+// ─── Render ───────────────────────────────────────────────────────────────
+async function loadData(tf) {
+  setLoadingText('Загрузка свечей…');
+  const data = await fetchCandles(SYMBOL, tf);
+  if (!data || data.length < 5) {
+    setLoadingText('❌ Нет данных ни на одной бирже');
+    return;
+  }
+
+  candleSeries.setData(data);
+  ema20Series.setData(calcEMA(data, 20));
+  ema50Series.setData(calcEMA(data, 50));
+  ema200Series.setData(calcEMA(data, 200));
+  vwapSeries.setData(calcVWAP(data));
+  rsiLine.setData(calcRSI(data));
+
+  chart.timeScale().fitContent();
+  drawLevels();
+
+  // Apply visibility
+  ema20Series.applyOptions({ visible: indVisible.ema20 });
+  ema50Series.applyOptions({ visible: indVisible.ema50 });
+  ema200Series.applyOptions({ visible: indVisible.ema200 });
+  vwapSeries.applyOptions({ visible: indVisible.vwap });
+
+  // Update ticker
+  const ticker = await fetchTicker(SYMBOL);
+  if (ticker) updateHeader(ticker);
+
+  hideLoading();
+  startTicker();
+}
+
+function startTicker() {
+  clearInterval(tickerInterval);
+  tickerInterval = setInterval(async () => {
+    const ticker = await fetchTicker(SYMBOL);
+    if (ticker) updateHeader(ticker);
+  }, 5000);
+}
+
+// ─── Header ───────────────────────────────────────────────────────────────
+function updateHeader(ticker) {
+  const price = parseFloat(ticker.lastPrice);
+  const chg   = parseFloat(ticker.priceChangePercent);
+  const el    = document.getElementById('price-badge');
+  el.textContent = formatPrice(price);
+  el.style.color = price > ENTRY && ENTRY ? '#22ab94' : price < ENTRY && ENTRY ? '#f23645' : '#e6edf3';
+
+  const badge = document.getElementById('change-badge');
+  badge.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
+  badge.className = 'change-badge ' + (chg >= 0 ? 'change-pos' : 'change-neg');
+
+  document.getElementById('symbol-badge').textContent = SYMBOL.replace('USDT','') + '/USDT';
+}
+
+// ─── Crosshair tooltip ────────────────────────────────────────────────────
+function handleCrosshair(param) {
+  const tt = document.getElementById('tooltip');
+  if (!param.point || !param.seriesData?.size) { tt.style.display='none'; return; }
+  const c = param.seriesData.get(candleSeries);
+  if (!c) { tt.style.display='none'; return; }
+  tt.style.display = 'block';
+  tt.style.left = Math.min(param.point.x + 12, window.innerWidth - 140) + 'px';
+  tt.style.top  = Math.max(param.point.y - 60, 4) + 'px';
+  const dir = c.close >= c.open ? '▲' : '▼';
+  const col = c.close >= c.open ? '#22ab94' : '#f23645';
+  tt.innerHTML = `
+    <div class="t-row"><span class="t-lbl">O</span><span class="t-val" style="color:${col}">${formatPrice(c.open)}</span></div>
+    <div class="t-row"><span class="t-lbl">H</span><span class="t-val">${formatPrice(c.high)}</span></div>
+    <div class="t-row"><span class="t-lbl">L</span><span class="t-val">${formatPrice(c.low)}</span></div>
+    <div class="t-row"><span class="t-lbl">C ${dir}</span><span class="t-val" style="color:${col}">${formatPrice(c.close)}</span></div>`;
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────
+function formatPrice(p) {
+  if (!p || isNaN(p)) return '—';
+  if (p >= 1000) return p.toLocaleString('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (p >= 1)    return p.toFixed(4);
+  return p.toFixed(6);
+}
+
+function setLoadingText(t) { document.getElementById('loading-text').textContent = t; }
+function hideLoading() {
+  const el = document.getElementById('loading');
+  el.style.opacity = '0';
+  setTimeout(() => el.style.display = 'none', 300);
+}
+
+// ─── Events ───────────────────────────────────────────────────────────────
+document.querySelectorAll('.tf-btn').forEach(btn => {
+  if (btn.dataset.tf === INIT_TF) btn.classList.add('active');
+  else btn.classList.remove('active');
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentTf = btn.dataset.tf;
+    document.getElementById('loading').style.cssText = 'display:flex;opacity:1;';
+    loadData(currentTf);
+  });
+});
+
+document.querySelectorAll('.ind-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const ind = btn.dataset.ind;
+    indVisible[ind] = !indVisible[ind];
+    btn.classList.toggle('active', indVisible[ind]);
+    if (ind === 'ema20')  ema20Series?.applyOptions({ visible: indVisible.ema20 });
+    if (ind === 'ema50')  ema50Series?.applyOptions({ visible: indVisible.ema50 });
+    if (ind === 'ema200') ema200Series?.applyOptions({ visible: indVisible.ema200 });
+    if (ind === 'vwap')   vwapSeries?.applyOptions({ visible: indVisible.vwap });
+    if (ind === 'levels') drawLevels();
+  });
+});
+
+// ─── Init ─────────────────────────────────────────────────────────────────
+initCharts();
+buildLevelPanel();
+loadData(INIT_TF);
+
+// Активировать правильный TF-кнопки при старте
+document.querySelectorAll('.tf-btn').forEach(b => {
+  b.classList.toggle('active', b.dataset.tf === INIT_TF);
+});
+</script>
+</body>
+</html>
