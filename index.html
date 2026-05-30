@@ -331,7 +331,21 @@ function initCharts() {
     grid:   colors.grid,
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
     rightPriceScale: { borderColor: '#30363d' },
-    timeScale: { borderColor: '#30363d', timeVisible: true, secondsVisible: false },
+    timeScale: {
+      borderColor: '#30363d',
+      timeVisible: true,
+      secondsVisible: false,
+      localization: {
+        timeFormatter: ts => {
+          const d = new Date(ts * 1000);
+          return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone });
+        },
+        dateFormatter: ts => {
+          const d = new Date(ts * 1000);
+          return d.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short', timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone });
+        },
+      },
+    },
     handleScroll: true,
     handleScale:  true,
   });
@@ -364,8 +378,32 @@ function initCharts() {
     autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }),
   });
 
-  // RSI
-  rsiChart.addLineSeries({ color: 'rgba(126,87,194,.25)', lineWidth: 1, lastValueVisible: false, priceLineVisible: false });
+  rsiChart.addLineSeries({
+    color: 'rgba(242,54,69,0.4)', lineWidth: 1,
+    lineStyle: LightweightCharts.LineStyle.Dashed,
+    priceLineVisible: false, lastValueVisible: false,
+    autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }),
+  }).setData([{ time: 0, value: 70 }]);  // будет перезаписан в loadData
+
+  rsiChart.addLineSeries({
+    color: 'rgba(34,171,148,0.4)', lineWidth: 1,
+    lineStyle: LightweightCharts.LineStyle.Dashed,
+    priceLineVisible: false, lastValueVisible: false,
+    autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }),
+  }).setData([{ time: 0, value: 30 }]);  // будет перезаписан в loadData
+
+  window._rsi70Series = rsiChart.addLineSeries({
+    color: 'rgba(242,54,69,0.35)', lineWidth: 1,
+    lineStyle: LightweightCharts.LineStyle.Dashed,
+    priceLineVisible: false, lastValueVisible: false,
+    autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }),
+  });
+  window._rsi30Series = rsiChart.addLineSeries({
+    color: 'rgba(34,171,148,0.35)', lineWidth: 1,
+    lineStyle: LightweightCharts.LineStyle.Dashed,
+    priceLineVisible: false, lastValueVisible: false,
+    autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }),
+  });
 
   chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
     if (range) rsiChart.timeScale().setVisibleLogicalRange(range);
@@ -377,7 +415,6 @@ function initCharts() {
 }
 
 function fitCharts() {
-  // Считаем высоту явно — flex:1 ненадёжен в Telegram Android WebView
   const totalH = window.Telegram?.WebApp?.viewportStableHeight
                || window.Telegram?.WebApp?.viewportHeight
                || window.innerHeight;
@@ -450,22 +487,27 @@ function calcRSI(data, period = 14) {
 
 // ─── Price levels ─────────────────────────────────────────────────────────
 function drawLevels() {
-  levelLines.forEach(l => { try { chart.removePriceLine(l); } catch(e){} });
+  levelLines.forEach(l => { try { candleSeries.removePriceLine(l); } catch(e){} });
   levelLines = [];
   if (!indVisible.levels) return;
-  const add = (price, color, title) => {
-    if (!price) return;
+
+  const isLong = DIR === 'LONG';
+
+  const add = (price, color, title, lineStyle = LightweightCharts.LineStyle.Dashed) => {
+    if (!price || isNaN(price)) return;
     levelLines.push(candleSeries.createPriceLine({
       price, color, lineWidth: 1.5,
-      lineStyle: LightweightCharts.LineStyle.Dashed,
-      axisLabelVisible: true, title,
+      lineStyle,
+      axisLabelVisible: true,
+      title,
     }));
   };
-  if (ENTRY) add(ENTRY, '#2962ff', 'ENTRY');
-  if (SL)    add(SL,    '#f23645', 'SL');
-  if (TP1)   add(TP1,   '#22ab94', 'TP1');
-  if (TP2)   add(TP2,   '#22ab94', 'TP2');
-  if (TP3)   add(TP3,   '#22ab94', 'TP3');
+
+  if (ENTRY) add(ENTRY, '#2962ff',  '── ENTRY',  LightweightCharts.LineStyle.Solid);
+  if (SL)    add(SL,    '#f23645',  '✂ SL');
+  if (TP1)   add(TP1,   '#22ab94',  '🎯 TP1');
+  if (TP2)   add(TP2,   '#00e676',  '🎯 TP2');
+  if (TP3)   add(TP3,   '#69f0ae',  '🎯 TP3');
 }
 
 function buildLevelPanel() {
@@ -558,7 +600,23 @@ async function loadData(tf) {
   ema50Series.setData(calcEMA(data, 50));
   ema200Series.setData(calcEMA(data, 200));
   vwapSeries.setData(calcVWAP(data));
-  rsiLine.setData(calcRSI(data));
+
+  const rsiData = calcRSI(data);
+  rsiLine.setData(rsiData);
+
+  if (rsiData.length > 1 && window._rsi70Series && window._rsi30Series) {
+    const t0 = rsiData[0].time;
+    const t1 = rsiData[rsiData.length - 1].time;
+    window._rsi70Series.setData([{ time: t0, value: 70 }, { time: t1, value: 70 }]);
+    window._rsi30Series.setData([{ time: t0, value: 30 }, { time: t1, value: 30 }]);
+  }
+
+  if (rsiData.length > 0) {
+    const curRsi = rsiData[rsiData.length - 1].value;
+    const rsiCol = curRsi >= 70 ? '#f23645' : curRsi <= 30 ? '#22ab94' : '#7e57c2';
+    const label  = document.getElementById('rsi-label');
+    label.innerHTML = `RSI (14) <span style="color:${rsiCol};font-size:11px">${curRsi.toFixed(1)}</span>`;
+  }
 
   chart.timeScale().fitContent();
   drawLevels();
