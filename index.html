@@ -261,6 +261,7 @@
   <button class="ind-btn"        data-ind="ema200" data-color="green">EMA 200</button>
   <button class="ind-btn active" data-ind="vwap"   data-color="purple">VWAP</button>
   <button class="ind-btn active" data-ind="levels" data-color="green">📐 Уровни</button>
+  <button class="ind-btn active" data-ind="liquidity" data-color="yellow" id="liq-btn" style="display:none">💧 Ликвидность</button>
 </div>
 
 <!-- Main chart -->
@@ -288,6 +289,13 @@ const TP1     = parseFloat(params.get('tp1')    || 0);
 const TP2     = parseFloat(params.get('tp2')    || 0);
 const TP3     = parseFloat(params.get('tp3')    || 0);
 const DIR     = params.get('dir') || '';
+// Liquidity zones from URL: liq=price1:type1,price2:type2,...
+// type: B=BUY_SIDE, S=SELL_SIDE
+const LIQ_RAW = params.get('liq') || '';
+const LIQ_ZONES = LIQ_RAW ? LIQ_RAW.split(',').map(z => {
+  const [price, type] = z.split(':');
+  return { price: parseFloat(price), type: type === 'B' ? 'BUY_SIDE' : 'SELL_SIDE' };
+}).filter(z => z.price && !isNaN(z.price)) : [];
 
 // ─── Telegram WebApp init ─────────────────────────────────────────────────
 if (window.Telegram?.WebApp) {
@@ -313,7 +321,8 @@ let ema200Series = null;
 let vwapSeries   = null;
 let levelLines   = [];
 let tickerInterval = null;
-const indVisible = { ema20: true, ema50: true, ema200: false, vwap: true, levels: true };
+const indVisible = { ema20: true, ema50: true, ema200: false, vwap: true, levels: true, liquidity: true };
+let liquidityLines = [];
 
 // ─── Chart init ───────────────────────────────────────────────────────────
 function initCharts() {
@@ -510,6 +519,23 @@ function drawLevels() {
   if (TP3)   add(TP3,   '#69f0ae',  '🎯 TP3');
 }
 
+function drawLiquidity() {
+  liquidityLines.forEach(l => { try { candleSeries.removePriceLine(l); } catch(e){} });
+  liquidityLines = [];
+  if (!indVisible.liquidity || !LIQ_ZONES.length) return;
+  LIQ_ZONES.forEach(z => {
+    const isBuy = z.type === 'BUY_SIDE';
+    liquidityLines.push(candleSeries.createPriceLine({
+      price: z.price,
+      color: isBuy ? '#f23645' : '#22ab94',
+      lineWidth: 1,
+      lineStyle: LightweightCharts.LineStyle.Dotted,
+      axisLabelVisible: true,
+      title: isBuy ? '🔴 BUY-LIQ' : '🟢 SELL-LIQ',
+    }));
+  });
+}
+
 function buildLevelPanel() {
   const panel = document.getElementById('level-panel');
   panel.innerHTML = '';
@@ -536,11 +562,8 @@ function buildLevelPanel() {
 const TF_BINANCE = { '1m':'1m','3m':'3m','5m':'5m','15m':'15m','30m':'30m','1h':'1h','4h':'4h','1d':'1d' };
 const TF_BINGX   = { '1m':'1','3m':'3','5m':'5','15m':'15','30m':'30','1h':'60','4h':'240','1d':'D' };
 
-async function fetchBinance(symbol, tf, limit = 300) {
-  const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${TF_BINANCE[tf]}&limit=${limit}`;
-  const r = await fetch(url);
-  const j = await r.json();
-  if (!Array.isArray(j)) return null;
+function _parseKlines(j) {
+  if (!Array.isArray(j) || !j.length) return null;
   return j.map(c => ({
     time:   Math.floor(parseInt(c[0]) / 1000),
     open:   parseFloat(c[1]),
@@ -551,12 +574,25 @@ async function fetchBinance(symbol, tf, limit = 300) {
   }));
 }
 
+async function fetchBinanceSpot(symbol, tf, limit = 300) {
+  try {
+    const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${TF_BINANCE[tf]}&limit=${limit}`;
+    return _parseKlines(await (await fetch(url)).json());
+  } catch(e) { return null; }
+}
+
+async function fetchBinanceFutures(symbol, tf, limit = 300) {
+  try {
+    const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${TF_BINANCE[tf]}&limit=${limit}`;
+    return _parseKlines(await (await fetch(url)).json());
+  } catch(e) { return null; }
+}
+
 async function fetchBingX(symbol, tf, limit = 300) {
   const bx = symbol.replace('USDT', '-USDT');
   const url = `https://open-api.bingx.com/openApi/swap/v2/quote/klines?symbol=${bx}&interval=${TF_BINGX[tf]}&limit=${limit}`;
   try {
-    const r = await fetch(url);
-    const j = await r.json();
+    const j = await (await fetch(url)).json();
     const candles = j?.data;
     if (!Array.isArray(candles) || !candles.length) return null;
     return candles.map(c => ({
@@ -571,9 +607,13 @@ async function fetchBingX(symbol, tf, limit = 300) {
 }
 
 async function fetchCandles(symbol, tf) {
-  let data = await fetchBinance(symbol, tf);
+  let data = await fetchBinanceSpot(symbol, tf);
   if (!data || data.length < 5) {
-    setLoadingText('Binance: нет данных, пробую BingX…');
+    setLoadingText('Spot: нет данных, пробую Futures…');
+    data = await fetchBinanceFutures(symbol, tf);
+  }
+  if (!data || data.length < 5) {
+    setLoadingText('Futures: нет данных, пробую BingX…');
     data = await fetchBingX(symbol, tf);
   }
   return data;
@@ -620,6 +660,7 @@ async function loadData(tf) {
 
   chart.timeScale().fitContent();
   drawLevels();
+  drawLiquidity();
 
   // Apply visibility
   ema20Series.applyOptions({ visible: indVisible.ema20 });
@@ -714,6 +755,7 @@ document.querySelectorAll('.ind-btn').forEach(btn => {
     if (ind === 'ema200') ema200Series?.applyOptions({ visible: indVisible.ema200 });
     if (ind === 'vwap')   vwapSeries?.applyOptions({ visible: indVisible.vwap });
     if (ind === 'levels') drawLevels();
+    if (ind === 'liquidity') drawLiquidity();
   });
 });
 
@@ -726,6 +768,10 @@ document.querySelectorAll('.tf-btn').forEach(b => {
 
 function initLoad() {
   fitCharts();
+  if (LIQ_ZONES.length > 0) {
+    const liqBtn = document.getElementById('liq-btn');
+    if (liqBtn) liqBtn.style.display = '';
+  }
   loadData(INIT_TF);
 }
 setTimeout(initLoad, 50);
